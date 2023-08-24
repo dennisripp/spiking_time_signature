@@ -21,6 +21,14 @@ def get_velocity_for_beat(note_num, time_signature):
         (3, 4): [random.randint(110,127), random.randint(70,90), random.randint(70,90)],       # 3/4 time signature
     }
     
+    # # clean profile
+    # accent_profiles = {
+    #     (4, 4): [110, 70, 90, 70],   # 4/4 time signature
+    #     (1, 4): [110],               # 1/4 time signature
+    #     (2, 4): [110, 70],           # 2/4 time signature
+    #     (3, 4): [110, 70, 90],       # 3/4 time signature
+    # }
+    
     # Get the accent profile for the given time signature
     profile = accent_profiles.get(time_signature, [80])  # Default to regular beat
     
@@ -56,7 +64,7 @@ def random_duration(min_duration=5, max_duration=20):
     return 10
 
 def random_noise_factor():
-    return random.uniform(0.01, 0.03)
+    return random.uniform(0.01, 0.019)
 
 def generate_random_sample(output_folder, time_signature=(4, 4)):
     bpm, instrument, duration = random_bpm(), random_instrument(), random_duration()
