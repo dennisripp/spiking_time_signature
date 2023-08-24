@@ -10,24 +10,30 @@ import tempfile  # Make sure to import this at the beginning of your script
 
 soundfont_path = 'soundfonts/SoundFonts_GeneralUser GS v1.471.sf2'
 
+dirty = False
+SAMPLE_CNT = 20
 
 def get_velocity_for_beat(note_num, time_signature):
     # Define accent profiles for different time signatures
     # For instance, for 4/4: first beat is strongly accented, third is mildly accented, and others are regular.
-    accent_profiles = {
-        (4, 4): [random.randint(110,127), random.randint(70,90), random.randint(90,110), random.randint(70,90)],   # 4/4 time signature
-        (1, 4): [random.randint(110,127)],               # 1/4 time signature
-        (2, 4): [random.randint(110,127), random.randint(70,90)],           # 2/4 time signature
-        (3, 4): [random.randint(110,127), random.randint(70,90), random.randint(70,90)],       # 3/4 time signature
-    }
     
-    # # clean profile
-    # accent_profiles = {
-    #     (4, 4): [110, 70, 90, 70],   # 4/4 time signature
-    #     (1, 4): [110],               # 1/4 time signature
-    #     (2, 4): [110, 70],           # 2/4 time signature
-    #     (3, 4): [110, 70, 90],       # 3/4 time signature
-    # }
+    accent_profiles = { }
+    
+    if dirty:
+        accent_profiles = {
+            (4, 4): [random.randint(110,127), random.randint(70,90), random.randint(90,110), random.randint(70,90)],   # 4/4 time signature
+            (1, 4): [random.randint(110,127)],               # 1/4 time signature
+            (2, 4): [random.randint(110,127), random.randint(70,90)],           # 2/4 time signature
+            (3, 4): [random.randint(110,127), random.randint(70,90), random.randint(70,90)],       # 3/4 time signature
+        }
+    else:    
+        # # clean profile
+        accent_profiles = {
+            (4, 4): [110, 70, 90, 70],   # 4/4 time signature
+            (1, 4): [110],               # 1/4 time signature
+            (2, 4): [110, 70],           # 2/4 time signature
+            (3, 4): [110, 70, 90],       # 3/4 time signature
+        }
     
     # Get the accent profile for the given time signature
     profile = accent_profiles.get(time_signature, [80])  # Default to regular beat
@@ -49,8 +55,9 @@ def midi_to_audio(midi, soundfont_path):
 
 def add_noise(data, noise_factor=0.05):
     noise = np.random.randn(len(data))
-    return data + noise_factor * noise
-   # return data
+    if dirty:
+        return data + noise_factor * noise
+    return data
 
 def random_bpm(min_bpm=60, max_bpm=180):
     return random.randint(min_bpm, max_bpm)
@@ -109,4 +116,4 @@ def generate_samples(num_samples=500):
         pool.starmap(generate_samples_for_type, tasks)
         
 # Example
-generate_samples(6)
+generate_samples(SAMPLE_CNT)
