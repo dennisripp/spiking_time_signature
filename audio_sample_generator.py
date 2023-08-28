@@ -13,6 +13,11 @@ soundfont_path = 'soundfonts/SoundFonts_GeneralUser GS v1.471.sf2'
 dirty = False
 SAMPLE_CNT = 20
 
+CLEAR_INSTRUMENTS = [0, 38, 76, 62, 65, 81]
+
+def random_instrument():
+    return random.choice(CLEAR_INSTRUMENTS)
+
 def get_velocity_for_beat(note_num, time_signature):
     # Define accent profiles for different time signatures
     # For instance, for 4/4: first beat is strongly accented, third is mildly accented, and others are regular.
@@ -29,10 +34,10 @@ def get_velocity_for_beat(note_num, time_signature):
     else:    
         # # clean profile
         accent_profiles = {
-            (4, 4): [110, 70, 90, 70],   # 4/4 time signature
+            (4, 4): [110, 30, 70, 30],   # 4/4 time signature
             (1, 4): [110],               # 1/4 time signature
-            (2, 4): [110, 70],           # 2/4 time signature
-            (3, 4): [110, 70, 90],       # 3/4 time signature
+            (2, 4): [110, 30],           # 2/4 time signature
+            (3, 4): [110, 30, 70],       # 3/4 time signature
         }
     
     # Get the accent profile for the given time signature
@@ -60,10 +65,11 @@ def add_noise(data, noise_factor=0.05):
     return data
 
 def random_bpm(min_bpm=60, max_bpm=180):
-    return random.randint(min_bpm, max_bpm)
+    #return random.randint(min_bpm, max_bpm)
+    return 120
 
-def random_instrument():
-    return random.randint(0, 127)
+# def random_instrument():
+#     return random.randint(0, 127)
 
 def random_duration(min_duration=5, max_duration=20):
     """Generate a random duration in seconds."""

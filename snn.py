@@ -97,12 +97,32 @@ def adjust_fixed_length(features, timesteps):
         return features
 
 # Convert real-valued features to Poisson spike trains
-def poisson_spike_encoding(data, duration, dt):
+def poisson_spike_encoding(data, duration=10, dt=1*ms):
     # Assuming data is normalized between 0 and 1
     rates = data * (1.0/dt)
     spikes = (np.random.rand(*data.shape) < rates*dt).astype(float)
     return spikes
 
+def temporal_binning(data, bin_size):
+    """
+    Bins the data into chunks of bin_size and returns the average of each chunk.
+    """
+    # Split the data into chunks of bin_size
+    binned_data = [np.mean(data[i:i+bin_size]) for i in range(0, len(data), bin_size)]
+    return np.array(binned_data)
+
+def rate_based_encoding(data, min_freq, max_freq):
+    """
+    Convert onset strengths to spike frequencies.
+    data: The input data (should be normalized to [0, 1])
+    min_freq: The minimum spike frequency (corresponds to data value of 0)
+    max_freq: The maximum spike frequency (corresponds to data value of 1)
+    Returns: Spike frequencies corresponding to input data
+    """
+    return min_freq + data * (max_freq - min_freq)
+
+
+# Process the audio file into desired features
 # Process the audio file into desired features
 def preprocess_audio(file_path):
     y, sr = librosa.load(file_path, sr=22050)  # setting sr ensures all files are resampled to this rate
@@ -118,12 +138,11 @@ def preprocess_audio(file_path):
     tempogram = adjust_fixed_length(tempogram, fixed_timesteps)
 
     # Stacking features horizontally
-    combined_features = np.vstack(onset_strength)
+    combined_features = np.vstack(poisson_spike_encoding(onset_strength))
     
     # Normalize to range [0, 1]
     encoded_features = (combined_features - np.min(combined_features)) / (np.max(combined_features) - np.min(combined_features))
     return encoded_features[20:]
-
 
 
 def count_files(directory):
@@ -167,10 +186,10 @@ training_data, training_labels = shuffle(training_data, training_labels)
 
 sample_index = np.random.randint(0, len(training_data))
 
-# for i in range(0, len(training_data)):
-#     plt.plot(training_data[i])
-#     plt.title(f"Random Sample from Normalized Data {training_labels[i]}")
-#     plt.show()
+for i in range(0, len(training_data)):
+    plt.plot(training_data[i])
+    plt.title(f"Random Sample from Normalized Data {training_labels[i]}")
+    plt.show()
 
 
 ## 2. Setting up the SNN:
@@ -183,6 +202,7 @@ print(f"Number of input neurons: {n_input}")
 
 n_hidden = 50  # Arbitrary
 n_output = 4  # Four time signatures
+eligibility_trace_decay = 0.9  # Adjust based on desired behavior
 
 # Define LIF model
 tau = 300*ms
@@ -192,6 +212,14 @@ dv/dt = (I + rest_potential - v)/tau : 1
 I : 1
 rest_potential = -0.1 : 1  # You can experiment with this value
 '''
+alpha = 0.001  # Regularization strength
+eqs += '''
+reg_penalty : 1
+'''
+eqs += '''
+e_trace : 1
+'''
+
 
 input_layer = NeuronGroup(n_input, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
 hidden_layer = NeuronGroup(n_hidden, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
@@ -200,6 +228,7 @@ output_layer = NeuronGroup(n_output, eqs, threshold='v>'+str(v_thresh), reset='v
 ### 3. Training the SNN:
 
 # Define STDP
+dropout_rate = 0.2
 tau_pre = 250*ms  # Decreased slightly for stronger potentiation
 tau_post = 350*ms  # Increased slightly for milder depression
 A_pre = 0.003  # Slightly reduce the potentiation
@@ -223,7 +252,12 @@ on_post_eqs = '''
 post += A_post
 w = clip(w + pre - decay_rate, w_min, w_max)
 '''
-
+on_pre_eqs += '''
+reg_penalty += alpha * w  # Adjust this based on desired behavior
+'''
+on_pre_eqs += '''
+e_trace = e_trace * eligibility_trace_decay + w
+'''
 # Define and connect the synapses with STDP
 p = 0.6
 w = '0.5'
@@ -282,6 +316,10 @@ for data_example, label in zip(training_data, training_labels):
         training_accuracies.append(1)
     else:
         training_accuracies.append(0)
+        
+    active_neurons = np.random.binomial(1, 1 - dropout_rate, size=n_hidden)
+    hidden_layer.active = 'bool(active_neurons[_i])'  # _i refers to neuron index
+
 
         
     # Plot input data
