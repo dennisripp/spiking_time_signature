@@ -12,6 +12,67 @@ from sklearn.utils import shuffle
 import random
 ## Preprocessing files
 fixed_timesteps = 1001
+PLOT = True
+
+def normalize_data(data):
+    """Normalisiert eine Liste von Werten zwischen 0 und 1."""
+    min_val = min(data)
+    max_val = max(data)
+    return [(val - min_val) / (max_val - min_val) for val in data]
+
+def plot_monitors(input_data, input_monitor, hidden_monitor, output_monitor, output_spike_monitor):
+    plt.figure(figsize=(15, 12))
+    t_offset = np.min(input_monitor.t/ms)
+    rows = 4
+    # Plot for input layer
+    plt.subplot(rows, 1, 1)
+    plt.title('Input Layer')
+    plt.plot(input_monitor.t/ms, input_monitor.v[0], label='Neuron 0')
+    plt.plot(input_monitor.t/ms, input_monitor.v[1], label='Neuron 1')
+    plt.plot(input_monitor.t/ms, input_monitor.v[2], label='Neuron 2')
+    plt.plot(input_monitor.t/ms, input_monitor.v[3], label='Neuron 3')
+    # ... repeat for other neurons if you want
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Membrane potential')
+    plt.legend()
+
+    # Plot for hidden layer
+    plt.subplot(rows, 1, 2)
+    plt.title('Hidden Layer')
+    plt.plot(hidden_monitor.t/ms, hidden_monitor.v[0], label='Neuron 0')
+    plt.plot(hidden_monitor.t/ms, hidden_monitor.v[1], label='Neuron 1')
+    plt.plot(hidden_monitor.t/ms, hidden_monitor.v[2], label='Neuron 2')
+    plt.plot(hidden_monitor.t/ms, hidden_monitor.v[3], label='Neuron 3')
+    plt.legend()
+    # ... repeat for other neurons if you want
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Membrane potential')
+
+    # Plot for output layer
+    plt.subplot(rows, 1, 3)
+    plt.title('Output Layer')
+    plt.plot(output_monitor.t/ms, output_monitor.v[0], label='Neuron 0')
+    plt.plot(output_monitor.t/ms, output_monitor.v[1], label='Neuron 1')
+    plt.plot(output_monitor.t/ms, output_monitor.v[2], label='Neuron 2')
+    plt.plot(output_monitor.t/ms, output_monitor.v[3], label='Neuron 3')
+    # ... repeat for other neurons if you want
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Membrane potential')
+
+    # Plot for output spikes
+    plt.subplot(rows, 1, 4)
+    plt.title('Input Layer')
+    plt.plot(input_data, label='Input Data')
+    # Add output spikes (assuming time is in ms)
+    for idx in range(len(output_spike_monitor.count)):
+        spike_times = output_spike_monitor.t[output_spike_monitor.i == idx] / ms
+        plt.plot(spike_times - t_offset, [1] * len(spike_times), '.', label=f'Output Neuron {idx} Spike')
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Amplitude / Spikes')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
 
 def get_length(file_path):
     y, sr = librosa.load(file_path)
@@ -138,11 +199,11 @@ def preprocess_audio(file_path):
     tempogram = adjust_fixed_length(tempogram, fixed_timesteps)
 
     # Stacking features horizontally
-    combined_features = np.vstack(poisson_spike_encoding(onset_strength))
+    combined_features = np.vstack(onset_strength)
     
     # Normalize to range [0, 1]
     encoded_features = (combined_features - np.min(combined_features)) / (np.max(combined_features) - np.min(combined_features))
-    return encoded_features[20:]
+    return encoded_features
 
 
 def count_files(directory):
@@ -171,7 +232,6 @@ print(fixed_timesteps)
 fixed_timesteps2 = determine_fixed_length('validation_data')
 print(fixed_timesteps2)
 fixed_timesteps = max(fixed_timesteps, fixed_timesteps2)
-
 # 1. Load and preprocess data
 print("Loading and preprocessing training data...")
 directories = ['training_data', 'validation_data']
@@ -184,12 +244,12 @@ print("\nDone with preprocessing!")
 # Shuffle training data and labels
 training_data, training_labels = shuffle(training_data, training_labels)
 
-sample_index = np.random.randint(0, len(training_data))
+# sample_index = np.random.randint(0, len(training_data))
 
-for i in range(0, len(training_data)):
-    plt.plot(training_data[i])
-    plt.title(f"Random Sample from Normalized Data {training_labels[i]}")
-    plt.show()
+# for i in range(0, len(training_data)):
+#     plt.plot(training_data[i])
+#     plt.title(f"Random Sample from Normalized Data {training_labels[i]}")
+#     plt.show()
 
 
 ## 2. Setting up the SNN:
@@ -200,26 +260,23 @@ n_input = len(training_data[0]) * len(training_data[0][0])
 
 print(f"Number of input neurons: {n_input}")
 
-n_hidden = 50  # Arbitrary
+n_hidden = 16  # Arbitrary
 n_output = 4  # Four time signatures
-eligibility_trace_decay = 0.9  # Adjust based on desired behavior
+# eligibility_trace_decay = 0.9  # Adjust based on desired behavior
 
+##########################################################################
 # Define LIF model
-tau = 300*ms
-v_thresh = 0.8
+dropout_rate = 0.2
+tau_m = 200*ms
+v_rest = 0
+v_thresh = 0.1  # v_threshold
+v_reset = 0  # v_reset
+r_m = 1.0  # membrane resistance
+dt = 10*ms  # time step
 eqs = '''
-dv/dt = (I + rest_potential - v)/tau : 1
+dv/dt = (-v + v_rest + r_m * I) / tau_m : 1
 I : 1
-rest_potential = -0.1 : 1  # You can experiment with this value
 '''
-alpha = 0.001  # Regularization strength
-eqs += '''
-reg_penalty : 1
-'''
-eqs += '''
-e_trace : 1
-'''
-
 
 input_layer = NeuronGroup(n_input, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
 hidden_layer = NeuronGroup(n_hidden, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
@@ -227,16 +284,70 @@ output_layer = NeuronGroup(n_output, eqs, threshold='v>'+str(v_thresh), reset='v
 
 ### 3. Training the SNN:
 
-# Define STDP
-dropout_rate = 0.2
-tau_pre = 250*ms  # Decreased slightly for stronger potentiation
-tau_post = 350*ms  # Increased slightly for milder depression
-A_pre = 0.003  # Slightly reduce the potentiation
-A_post = -A_pre * 1.8  # Make depression stronger than potentiation
+# # Define STDP
+# tau_pre = 4000*ms  # Decreased slightly for stronger potentiation
+# tau_post = 4500*ms  # Increased slightly for milder depression
+# dropout_rate = 0.2
+
+# A_pre = 0.0003  # Slightly reduce the potentiation
+# A_post = -A_pre * 1.4  # Make depression stronger than potentiation
+# delta_t = 10*ms  # the maximum time difference for STDP 
+# w_max = 1.0
+# w_min = 0.0
+# decay_rate = 0.0033 #0.0005  # Experiment with this rate
+# stdp_eqs = '''
+# w : 1
+# dpre/dt = -pre / tau_pre : 1 (event-driven)
+# dpost/dt = -post / tau_post : 1 (event-driven)
+# '''
+# on_pre_eqs = '''
+# I += w
+# pre += A_pre
+# w = clip(w + post - decay_rate, w_min, w_max)
+# '''
+
+# on_post_eqs = '''
+# post += A_post
+# w = clip(w + pre - decay_rate, w_min, w_max)
+# '''
+##########################################################################
+
+
+
+
+# # Define LIF model
+# tau = 300*ms
+# v_thresh = 0.8
+# eqs = '''
+# dv/dt = (I + rest_potential - v)/tau : 1
+# I : 1
+# rest_potential = -0.1 : 1  # You can experiment with this value
+# '''
+# alpha = 0.001  # Regularization strength
+# eqs += '''
+# reg_penalty : 1
+# '''
+# eqs += '''
+# e_trace : 1
+# '''
+
+
+# input_layer = NeuronGroup(n_input, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
+# hidden_layer = NeuronGroup(n_hidden, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
+# output_layer = NeuronGroup(n_output, eqs, threshold='v>'+str(v_thresh), reset='v=0', method='linear')
+
+# ### 3. Training the SNN:
+
+# # Define STDP
+# dropout_rate = 0.2
+tau_pre = 100*ms  # Decreased slightly for stronger potentiation
+tau_post = 100*ms  # Increased slightly for milder depression
+A_pre = 0.02  # Slightly reduce the potentiation
+A_post = -A_pre * 1.2  # Make depression stronger than potentiation
 delta_t = 20*ms  # the maximum time difference for STDP 
 w_max = 1.0
 w_min = 0.0
-decay_rate = 0.0033 #0.0005  # Experiment with this rate
+decay_rate =  0#0.0033 #0.0005  # Experiment with this rate
 stdp_eqs = '''
 w : 1
 dpre/dt = -pre / tau_pre : 1 (event-driven)
@@ -252,14 +363,26 @@ on_post_eqs = '''
 post += A_post
 w = clip(w + pre - decay_rate, w_min, w_max)
 '''
-on_pre_eqs += '''
-reg_penalty += alpha * w  # Adjust this based on desired behavior
-'''
-on_pre_eqs += '''
-e_trace = e_trace * eligibility_trace_decay + w
-'''
+# on_pre_eqs += '''
+# reg_penalty += alpha * w  # Adjust this based on desired behavior
+# '''
+# on_pre_eqs += '''
+# e_trace = e_trace * eligibility_trace_decay + w
+# '''
+# p = 1.0
+# w = '0.5'
+# w = 'rand()'
+
+# synapses_input_hidden = Synapses(input_layer, hidden_layer, 'w : 1')
+# synapses_input_hidden.connect(p=p)
+# synapses_input_hidden.w = 'rand()'
+
+# synapses_hidden_output = Synapses(hidden_layer, output_layer, 'w : 1')
+# synapses_hidden_output.connect(p=p)
+# synapses_hidden_output.w = 'rand()'
+
 # Define and connect the synapses with STDP
-p = 0.6
+p = 1.0
 w = '0.5'
 synapses_input_hidden = Synapses(input_layer, hidden_layer, model=stdp_eqs, on_pre=on_pre_eqs, on_post=on_post_eqs)
 synapses_input_hidden.connect(p=p)
@@ -268,7 +391,6 @@ synapses_input_hidden.w = w
 synapses_hidden_output = Synapses(hidden_layer, output_layer, model=stdp_eqs, on_pre=on_pre_eqs, on_post=on_post_eqs)
 synapses_hidden_output.connect(p=p)
 synapses_hidden_output.w = w
-
 
 # with open('snn_model_state.pkl', 'rb') as f:
 #     loaded_model_state = pickle.load(f)
@@ -285,10 +407,11 @@ total_samples = len(training_data)
 training_accuracies = []
 
 # Constants
-TIME_STEP = 20*ms
 
 print("Training network...")
 epoch_cnt = 1
+TIME_ALL = n_input * ms
+TIME_STEP = TIME_ALL / 10
 
 # In your training loop
 for data_example, label in zip(training_data, training_labels):
@@ -298,10 +421,14 @@ for data_example, label in zip(training_data, training_labels):
     input_layer.I = data_example.flatten()
     # Create a new SpikeMonitor for each iteration
     output_spike_monitor = SpikeMonitor(output_layer)
-
+    input_monitor = StateMonitor(input_layer, 'v', record=True)
+    hidden_monitor = StateMonitor(hidden_layer, 'v', record=True)
+    output_monitor = StateMonitor(output_layer, 'v', record=True)
+    
+    
     # Now, instead of running the entire 1 second at once, break it into TIME_STEP increments.
-    with tqdm(total=int((1*second)/TIME_STEP), leave=False, desc=f"Training [{epoch_cnt}/{len(training_data)}] completed") as pbar:
-        for _ in range(int((1*second)/TIME_STEP)):
+    with tqdm(total=int((TIME_ALL)/TIME_STEP), leave=False, desc=f"Training [{epoch_cnt}/{len(training_data)}] completed") as pbar:
+        for _ in range(int((TIME_ALL)/TIME_STEP)):
             run(TIME_STEP)
             pbar.update(1)   
     epoch_cnt += 1
@@ -317,40 +444,25 @@ for data_example, label in zip(training_data, training_labels):
     else:
         training_accuracies.append(0)
         
-    active_neurons = np.random.binomial(1, 1 - dropout_rate, size=n_hidden)
-    hidden_layer.active = 'bool(active_neurons[_i])'  # _i refers to neuron index
+    # active_neurons = np.random.binomial(1, 1 - dropout_rate, size=n_hidden)
+    # hidden_layer.active = 'bool(active_neurons[_i])'  # _i refers to neuron index
 
 
         
     # Plot input data
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1, 2, 1)
-    plt.plot(data_example)
-    plt.title("Input Data")
-    plt.xlabel("Time")
-    plt.ylabel("Amplitude")
-
-    # Plot spike train
-    plt.subplot(1, 2, 2)
-    for idx in range(4):
-        spike_times = output_spike_monitor.t[output_spike_monitor.i == idx] / ms
-        plt.plot(spike_times, [idx] * len(spike_times), '.', label=f'Neuron {idx}')
-    plt.xlabel("Time (ms)")
-    plt.ylabel("Output Neuron Index")
-    plt.title(f"Output Spike Train Pred: {predicted_label} vs True: {label}")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"spike_train_{label}_{random.randint(1,9999)}.png")
-    plt.close()
+    if PLOT: 
+        all_empty = all(count == 0 for count in output_spike_monitor.count[:])
+        if all_empty: 
+            plot_monitors(data_example, input_monitor, hidden_monitor, output_monitor, output_spike_monitor)
 
     # Reset the state of the network
-    # input_layer.v = 0
-    # hidden_layer.v = 0
-    # output_layer.v = 0
-    # synapses_input_hidden.pre = 0
-    # synapses_input_hidden.post = 0
-    # synapses_hidden_output.pre = 0
-    # synapses_hidden_output.post = 0
+    input_layer.v = 0
+    hidden_layer.v = 0
+    output_layer.v = 0
+    synapses_input_hidden.pre = 0
+    synapses_input_hidden.post = 0
+    synapses_hidden_output.pre = 0
+    synapses_hidden_output.post = 0
 
       
 
