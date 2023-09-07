@@ -72,12 +72,12 @@ def get_velocity_for_beat(note_num, time_signature, rotation, accent_profiles):
 def get_accent_profiles(dirty):
     if dirty:
         return {
-            (4, 4): [random.randint(115,127), random.randint(40,60), random.randint(90,110), random.randint(40,60)],   # 4/4 time signature
-            (1, 4): [random.randint(110,127)],               # 1/4 time signature
-            (2, 4): [random.randint(110,127), random.randint(80,95)],           # 2/4 time signature
-            (3, 4): [random.randint(110,127), random.randint(40,60),  random.randint(40,60)],       # 3/4 time signature
-            (5, 4): [random.randint(110,127), random.randint(70, 85), random.randint(70, 85), random.randint(90, 105), random.randint(70, 85)],  # Odd time signature
-            (7, 8): [random.randint(110,127), random.randint(70, 85), random.randint(70, 85), random.randint(90, 105), random.randint(70, 85), random.randint(70, 85), random.randint(70, 85)],  # Odd time signature
+            (1, 4): [random.randint(115,127)],               # 1/4 time signature: single strong beat
+            (2, 4): [random.randint(115,127), random.randint(80,95)],           # 2/4 time signature: strong-weak
+            (3, 4): [random.randint(115,127), random.randint(100,110), random.randint(70,85)],       # 3/4 time signature: strong-medium-weak
+            (4, 4): [random.randint(115,127), random.randint(100,110), random.randint(115,127), random.randint(70,85)],   # 4/4 time signature: strong-medium-strong-weak
+            (5, 4): [random.randint(115,127), random.randint(115,127), random.randint(100,110), random.randint(100,110), random.randint(70,85)],  # 5/4 time signature: strong-strong-medium-medium-weak
+            (7, 8): [random.randint(115,127), random.randint(115,127), random.randint(100,110), random.randint(100,110), random.randint(70,85), random.randint(70,85), random.randint(70,85)],  # 7/8 time signature: strong-strong-medium-medium-weak-weak-weak
         }
     else:    
         # # clean profile
@@ -108,8 +108,8 @@ def add_noise(data, noise_factor=0.05):
     return data
 
 def random_bpm(min_bpm=115, max_bpm=125):
-    if dirty:    
-        return random.randint(min_bpm, max_bpm)
+    # if dirty:    
+    #     return random.randint(min_bpm, max_bpm)
     return BPM
 
 # def random_instrument():
