@@ -108,8 +108,8 @@ def add_noise(data, noise_factor=0.05):
     return data
 
 def random_bpm(min_bpm=115, max_bpm=125):
-    # if dirty:    
-    #     return random.randint(min_bpm, max_bpm)
+    if dirty:    
+        return random.randint(min_bpm, max_bpm)
     return BPM
 
 # def random_instrument():
