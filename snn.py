@@ -90,7 +90,7 @@ def determine_fixed_length(directory):
     # Utilize multiprocessing for faster computation
     with ProcessPoolExecutor() as executor:
         lengths = list(executor.map(get_length, file_paths))
-
+    
     return min(lengths)
 
 def parallel_data_loader(directories):
