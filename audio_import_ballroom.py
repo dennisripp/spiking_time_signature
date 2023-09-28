@@ -34,6 +34,16 @@ def get_length(file_path):
     mfccs = librosa.feature.melspectrogram(y=y, sr=sr)
     return mfccs.shape[1]
 
+def is_silent(segment, sr, threshold=0.01):
+    """Check if the segment is silent based on its RMS energy."""
+    rms_value = np.sqrt(np.mean(segment**2))
+    return rms_value < threshold
+
+def has_low_onset(segment, sr, onset_threshold=0.5):
+    """Check if the segment has low onset strength."""
+    onset_strengths = librosa.onset.onset_strength(y=segment, sr=sr)
+    mean_onset_strength = np.mean(onset_strengths)
+    return mean_onset_strength < onset_threshold
 
 def get_bpm_from_ground_truth(audio_path):
     # Extrahieren Sie nur den Dateinamen aus dem vollständigen Dateipfad
@@ -166,6 +176,14 @@ def preprocess_audio(file_path):
     
     segment_features = []
     for segment in segments:
+        if is_silent(segment, sr):
+            print("Skipping this data segment because it's silent")
+            continue
+        
+        # Skip segments with low onsets (nothing interesting going on)
+        if has_low_onset(segment, sr):
+            print("Skipping this data segment because it's spectral flux is too low")
+            continue
         # Extracting Mel spectrogram
         mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
             # Extracting BPM (Tempo)
@@ -181,10 +199,15 @@ def preprocess_audio(file_path):
             
             # Slice the Mel spectrogram to retain only the desired bands
             mel_spectrogram = mel_spectrogram[idx_start:idx_end+1, :]
-        
+        max_val = np.max(mel_spectrogram)
+        min_val = np.min(mel_spectrogram)
         # Adjusting Mel spectrogram length if necessary (similar to onset_strength_adjusted)
         # mel_spectrogram_adjusted =  adjust_fixed_length(mel_spectrogram, fixed_timesteps, 1) # adjust as needed
-        mel_spectrogram_normalized = (mel_spectrogram - np.min(mel_spectrogram)) / (np.max(mel_spectrogram) - np.min(mel_spectrogram))
+        if max_val - min_val == 0:  # Check if denominator is zero
+            print("Skipping this data point because the Mel spectrogram is all zeros")
+            continue  # Skip this data point and move on to the next segment
+        else:
+            mel_spectrogram_normalized = (mel_spectrogram - np.min(mel_spectrogram)) / (np.max(mel_spectrogram) - np.min(mel_spectrogram))
         
         combined_features = np.vstack(mel_spectrogram_normalized), tempo
         
@@ -209,6 +232,7 @@ class CustomAudioDataset(Dataset):
         self.data = data
         self.groundtruth = groundtruth
         self.bpm_librosa = bpm_librosa
+        
 
     def __len__(self):
         return len(self.data)

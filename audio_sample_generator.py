@@ -21,8 +21,10 @@ dirty = True
 # if not dirty:
 SAMPLE_CNT = 1000
 SR = int(44100/2)
-DURATION = 6 # seconds
+DURATION = 12 # seconds
 BPM = 120
+MAX_BPM = 200
+MIN_BPM = 80
 
 CLEAR_INSTRUMENTS = [0]
 
@@ -107,7 +109,7 @@ def add_noise(data, noise_factor=0.05):
         return data + noise_factor * noise
     return data
 
-def random_bpm(min_bpm=80, max_bpm=140):
+def random_bpm(min_bpm=MIN_BPM, max_bpm=MAX_BPM):
     if dirty:    
         return random.randint(min_bpm, max_bpm)
     return BPM

@@ -18,7 +18,7 @@ import re
 
 
 
-sub_dirs = os.listdir("ballroom/BallroomData")
+sub_dirs = ['1_4', '2_4', '3_4', '4_4', '5_4', '7_8']
 
 CORE_COUNT : int = int(cpu_count()-1) 
 num_features = 1  # onset_strength and BPM # pnly onset_strength # surrogate + onset
@@ -29,21 +29,6 @@ SR = int(16000)
 
 print(f"Number of cores used: {CORE_COUNT}")
 
-def get_length(file_path):
-    y, sr = librosa.load(file_path, sr=SR)
-    mfccs = librosa.feature.melspectrogram(y=y, sr=sr)
-    return mfccs.shape[1]
-
-
-def get_bpm_from_ground_truth(audio_path):
-    # Extrahieren Sie nur den Dateinamen aus dem vollständigen Dateipfad
-    file_name = os.path.basename(audio_path)
-    # Erstellen Sie den Pfad zur entsprechenden Ground Truth-Datei
-    ground_truth_path = os.path.join("ballroom/ballroomGroundTruth", file_name.replace(".wav", ".bpm"))
-    
-    with open(ground_truth_path, 'r') as f:
-        bpm = float(f.readline().strip())
-    return bpm
 
 def parallel_data_loader(directories):
     with ThreadPoolExecutor() as executor:
@@ -55,34 +40,41 @@ def load_and_preprocess_data_subdir(args):
     data = []
     labels = []
     val_bpm = []
+    
+    # Only load up to 20 files per subdirectory
+    files_to_load = os.listdir(os.path.join(directory, subdir))[:FILES_TO_LOAD]
 
     
-    all_files = os.listdir(os.path.join(directory, subdir))
-    
-    # Filtern nach Dateierweiterung (z.B. .wav für Audio-Dateien)
-    filtered_files = [f for f in all_files if os.path.splitext(f)[1] == ".wav"]
-    
-    files_to_load = filtered_files[:FILES_TO_LOAD]
-
     for file in files_to_load:
         file_path = os.path.join(directory, subdir, file)
-        bpm_ground_truth = get_bpm_from_ground_truth(file_path)
-
+        instrument, bpm, _, _ = extract_bpm_and_instrument(file_path)
         processed_data = preprocess_audio(file_path)
+        label = int(bpm)
         for segment, bpm_librosa in processed_data:
             data.append(segment)
-            labels.append(bpm_ground_truth)  # use the ground truth bpm as the label
+            labels.append(label)  # use the ground truth bpm as the label
             val_bpm.append(bpm_librosa)
-
+    
     return data, labels, val_bpm
 
+
+def extract_bpm_and_instrument(file_path):
+    # Using \d+ to match one or more digits and [\d.]+ to match a float or integer pattern for noise.
+    match = re.search(r"instrument_(\d+)_bpm_(\d+)_rotation_\d+_duration_(\d+)_noise_([\d.]+)", file_path)
+    if match:
+        instrument = match.group(1)
+        bpm = match.group(2)
+        duration = match.group(3)
+        noise = match.group(4)
+        return instrument, bpm, duration, noise
+    return None, None, None, None
 
 def parallel_load_and_preprocess(directory):
     # Create a pool of processes
     pool = Pool(CORE_COUNT)
 
     # Create a list of tasks
-    tasks = [(directory, genre) for genre in sub_dirs]
+    tasks = [(directory, time_sig) for time_sig in sub_dirs]
 
     # Use imap_unordered to distribute the work among the processes
     results = list(tqdm(pool.imap_unordered(load_and_preprocess_data_subdir, tasks), total=len(tasks), mininterval=0.01))
@@ -107,52 +99,40 @@ def parallel_load_and_preprocess(directory):
 
 def sliding_window(data, window_size, step_size):
     """
-    Split the data into overlapping windows. Discard the last window if it's not long enough.
+    Split the data into overlapping windows. 
+    For data that's shorter than the window size, just return the entire data as a single window.
 
     :param data: The data to be split into windows.
     :param window_size: The size of each window.
     :param step_size: The distance between the start points of consecutive windows.
     :return: A list of windows.
     """
+    if len(data) <= window_size:
+        return []
+    
     num_windows = (len(data) - window_size) // step_size + 1
+
+    if num_windows <= 0:
+        return []
+
     windows = [data[i * step_size:i * step_size + window_size] for i in range(num_windows)]
     
-    # Check the last window's length
     if len(windows[-1]) != window_size:
-        windows.pop()  # Remove the last window if it doesn't match the window_size
+        windows.pop()
     
     return windows
 
-def adjust_fixed_length(features, timesteps, time_axis=-1):
-    """
-    Adjust the length of a data array along the specified time axis.
+   
+def is_silent(segment, sr, threshold=0.01):
+    """Check if the segment is silent based on its RMS energy."""
+    rms_value = np.sqrt(np.mean(segment**2))
+    return rms_value < threshold
 
-    :param features: The input data array to adjust.
-    :param timesteps: The desired length of the time axis.
-    :param time_axis: The axis to adjust. Defaults to the last axis.
-    :return: The adjusted array.
-    """
-    if time_axis < 0:
-        time_axis = features.ndim + time_axis
-    
-    # Check if the current length of the time axis matches the desired length
-    if features.shape[time_axis] == timesteps:
-        return features
-    
-    # Indices to slice; a full slice for all dimensions
-    slicer = [slice(None)] * features.ndim
-
-    # If the current length is greater than the desired length, crop it
-    if features.shape[time_axis] > timesteps:
-        slicer[time_axis] = slice(0, timesteps)
-        return features[tuple(slicer)]
-    
-    # If the current length is less than the desired length, pad it
-    else:
-        padding_length = timesteps - features.shape[time_axis]
-        pad_widths = [(0, 0) if i != time_axis else (0, padding_length) for i in range(features.ndim)]
-        return np.pad(features, pad_widths, mode='constant')
-
+def has_low_onset(segment, sr, onset_threshold=0.5):
+    """Check if the segment has low onset strength."""
+    onset_strengths = librosa.onset.onset_strength(y=segment, sr=sr)
+    mean_onset_strength = np.mean(onset_strengths)
+    return mean_onset_strength < onset_threshold
 
 def preprocess_audio(file_path):
     # y, sr = librosa.load(file_path, sr=22050)  # setting sr ensures all files are resampled to this rate
@@ -166,12 +146,20 @@ def preprocess_audio(file_path):
     
     segment_features = []
     for segment in segments:
+        if is_silent(segment, sr):
+            print("Skipping this data segment because it's silent")
+            continue
+        
+        # Skip segments with low onsets (nothing interesting going on)
+        if has_low_onset(segment, sr):
+            print("Skipping this data segment because it's spectral flux is too low")
+            continue
         # Extracting Mel spectrogram
         mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
             # Extracting BPM (Tempo)
         tempo, _ = librosa.beat.beat_track(y=segment, sr=sr)
         
-        # # Get the Mel frequency values
+        # Get the Mel frequency region of interest
         if True: 
             mel_freqs = librosa.core.mel_frequencies(n_mels=mel_spectrogram.shape[0], fmin=0, fmax=sr/2)
             
@@ -181,10 +169,15 @@ def preprocess_audio(file_path):
             
             # Slice the Mel spectrogram to retain only the desired bands
             mel_spectrogram = mel_spectrogram[idx_start:idx_end+1, :]
-        
+        max_val = np.max(mel_spectrogram)
+        min_val = np.min(mel_spectrogram)
         # Adjusting Mel spectrogram length if necessary (similar to onset_strength_adjusted)
         # mel_spectrogram_adjusted =  adjust_fixed_length(mel_spectrogram, fixed_timesteps, 1) # adjust as needed
-        mel_spectrogram_normalized = (mel_spectrogram - np.min(mel_spectrogram)) / (np.max(mel_spectrogram) - np.min(mel_spectrogram))
+        if max_val - min_val == 0:  # Check if denominator is zero
+            print("Skipping this data point because the Mel spectrogram is all zeros")
+            continue  # Skip this data point and move on to the next segment
+        else:
+            mel_spectrogram_normalized = (mel_spectrogram - np.min(mel_spectrogram)) / (np.max(mel_spectrogram) - np.min(mel_spectrogram))
         
         combined_features = np.vstack(mel_spectrogram_normalized), tempo
         
@@ -193,16 +186,11 @@ def preprocess_audio(file_path):
 
     return segment_features
 
-
-def count_files(directory):
-    return sum([len(files) for _, _, files in os.walk(directory)])
-
 def set_files_to_load(files_to_load, sr):
     global FILES_TO_LOAD, SR
     FILES_TO_LOAD = files_to_load
     SR = sr
     
-
 
 class CustomAudioDataset(Dataset):
     def __init__(self, data, groundtruth, bpm_librosa):
@@ -232,16 +220,17 @@ def import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ra
         set_files_to_load(files_to_load, sr)
     
         # checking shapes
-    training_data_path = 'ballroom/BallroomData'
-    # validation_data_path = 'validation_data_dirty_bpm' if DIRTY else 'validation_data_clean'
+    training_data_path = 'training_data_dirty_bpm' 
+    validation_data_path = 'validation_data_dirty_bpm'   # validation_data_path = 'validation_data_dirty_bpm' if DIRTY else 'validation_data_clean'
 
     # print(fixed_timesteps)
     print("Loading and preprocessing training data...")
-    directories = [training_data_path]
+    directories = [training_data_path, validation_data_path]
     # training_data_results, validation_data_results = parallel_data_loader(directories)
-    training_data_results, = parallel_data_loader(directories)
-
+    training_data_results, validation_data_results = parallel_data_loader(directories)
+    
     training_data, training_labels, training_bpms = training_data_results
+    validation_data, validation_labels, validation_bpms = validation_data_results
     # validation_data, validation_labels, validation_bpms, validation_genres = validation_data_results
     print("\nDone with preprocessing!")
     
@@ -250,7 +239,7 @@ def import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ra
     # print(f"sample data containments: {training_data[0]} ")
 
     
-    train_dataset = CustomAudioDataset(training_data, training_labels, training_bpms)
+    train_dataset = CustomAudioDataset(training_data+validation_data, training_labels+validation_labels, training_bpms+validation_bpms)
 
     from torch.utils.data import random_split
 
@@ -262,34 +251,8 @@ def import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ra
     if only_dataset:
         return train_dataset, val_dataset, training_data[0].shape
 
-    # sample_batch = train_dataset
-    # sample, groundtrush, bpm, genre = sample_batch[0]
-
-    # print("groundtruth: ", groundtrush.cpu().numpy())
-    # print("bpm_librosa: ", bpm.cpu().numpy())
-    # print("genre: ", genre.cpu().numpy())
-
-    # print(sample[0].shape)
-    # test_dataset = CustomAudioDataset(validation_data, validation_labels, validation_bpms, validation_genres)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
     
     return train_loader, val_loader, training_data[0].shape
-
-
-# train_loader, _ = import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ratio = 0.8, files_to_load = 2)
-
-# data, targets, librosa_bpm, _ = next(iter(train_loader))
-
-# single_mel = data[0].squeeze(0)  # select the first mel-spec from the batch and remove the channel dimension
-
-# # librosa.display.specshow(librosa.power_to_db(data, ref=np.max), y_axis='mel', x_axis='time')
-# plt.imshow(librosa.power_to_db(single_mel, ref=np.max), origin='lower', aspect='auto')
-# plt.colorbar(format='%+2.0f dB')
-# plt.show()
-
-
-    
-# test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-
