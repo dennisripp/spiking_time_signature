@@ -15,8 +15,8 @@ from torch.utils.data import Dataset
 import snntorch as snn
 import torch
 import re
-
-
+from scipy import interpolate
+import scipy.ndimage
 
 sub_dirs = os.listdir("ballroom/BallroomData")
 
@@ -25,7 +25,9 @@ num_features = 1  # onset_strength and BPM # pnly onset_strength # surrogate + o
 DIRTY = True
 onset_padding = 20
 FILES_TO_LOAD = 10
+TIME_DURATION = 6
 SR = int(16000)
+AUGMENTED = False
 
 print(f"Number of cores used: {CORE_COUNT}")
 
@@ -44,6 +46,17 @@ def has_low_onset(segment, sr, onset_threshold=0.5):
     onset_strengths = librosa.onset.onset_strength(y=segment, sr=sr)
     mean_onset_strength = np.mean(onset_strengths)
     return mean_onset_strength < onset_threshold
+
+def scale_time_axis(mel_spectrogram, scale_factor):
+    num_mels, num_frames = mel_spectrogram.shape
+    new_num_frames = int(scale_factor * num_frames)
+    x_old = np.linspace(0, num_frames - 1, num_frames)
+    x_new = np.linspace(0, num_frames - 1, new_num_frames)
+    
+    interpolator = interpolate.interp1d(x_old, mel_spectrogram, axis=1, kind='linear')
+    scaled_spectrogram = interpolator(x_new)
+    
+    return scaled_spectrogram
 
 def get_bpm_from_ground_truth(audio_path):
     # Extrahieren Sie nur den Dateinamen aus dem vollständigen Dateipfad
@@ -78,10 +91,10 @@ def load_and_preprocess_data_subdir(args):
         file_path = os.path.join(directory, subdir, file)
         bpm_ground_truth = get_bpm_from_ground_truth(file_path)
 
-        processed_data = preprocess_audio(file_path)
-        for segment, bpm_librosa in processed_data:
+        processed_data = preprocess_audio(file_path, bpm_ground_truth)
+        for segment, bpm_librosa, ground_truth_new in processed_data:
             data.append(segment)
-            labels.append(bpm_ground_truth)  # use the ground truth bpm as the label
+            labels.append(ground_truth_new)  # use the ground truth bpm as the label
             val_bpm.append(bpm_librosa)
 
     return data, labels, val_bpm
@@ -133,45 +146,43 @@ def sliding_window(data, window_size, step_size):
     
     return windows
 
-def adjust_fixed_length(features, timesteps, time_axis=-1):
-    """
-    Adjust the length of a data array along the specified time axis.
-
-    :param features: The input data array to adjust.
-    :param timesteps: The desired length of the time axis.
-    :param time_axis: The axis to adjust. Defaults to the last axis.
-    :return: The adjusted array.
-    """
-    if time_axis < 0:
-        time_axis = features.ndim + time_axis
+def stretch_and_crop(y, groundtruth, window_size):
+    import random
+    # Load the audio file    
+    scaling_factor2 = np.random.uniform(0.6, 1.49)  # Random scaling factor between 0.8 and 1.2
     
-    # Check if the current length of the time axis matches the desired length
-    if features.shape[time_axis] == timesteps:
-        return features
+    scaling_factor = random.uniform(0.6, 1.49)
+        
+    new_groundtruth = int(groundtruth * scaling_factor)
+
+    # Stretch or shrink the audio data
+    audio = librosa.effects.time_stretch(y=y, rate=scaling_factor)
     
-    # Indices to slice; a full slice for all dimensions
-    slicer = [slice(None)] * features.ndim
+    # Ensure the audio length is at least window_size
+    if len(audio) < window_size:
+        padding = np.zeros(window_size - len(audio))
+        audio = np.concatenate((audio, padding))
+    elif len(audio) > window_size:
+        # Randomly crop the audio to window_size
+        start_idx = random.randint(0, len(audio) - window_size)
+        audio = audio[start_idx:start_idx + window_size]
 
-    # If the current length is greater than the desired length, crop it
-    if features.shape[time_axis] > timesteps:
-        slicer[time_axis] = slice(0, timesteps)
-        return features[tuple(slicer)]
+    # Compute the mel spectrogram
+    tempo, _ = librosa.beat.beat_track(y=audio, sr=SR)
+    mel_spec = librosa.feature.melspectrogram(y=audio, sr=SR)
     
-    # If the current length is less than the desired length, pad it
-    else:
-        padding_length = timesteps - features.shape[time_axis]
-        pad_widths = [(0, 0) if i != time_axis else (0, padding_length) for i in range(features.ndim)]
-        return np.pad(features, pad_widths, mode='constant')
+    return mel_spec, new_groundtruth, tempo
 
 
-def preprocess_audio(file_path):
+def preprocess_audio(file_path, ground_truth):
+    global AUGMENTED
     # y, sr = librosa.load(file_path, sr=22050)  # setting sr ensures all files are resampled to this rate
     y, sr = librosa.load(file_path, sr=SR)  # setting sr ensures all files are resampled to this rate
     
-    window_size = 6 * SR  # 6 seconds multiplied by the sampling rate
+    window_size = TIME_DURATION * SR  # 6 seconds multiplied by the sampling rate
     step_size = window_size // 2  # 50% overlap
     segments = sliding_window(y, window_size, step_size)
-    
+    tempo = 0
     
     
     segment_features = []
@@ -184,13 +195,22 @@ def preprocess_audio(file_path):
         if has_low_onset(segment, sr):
             print("Skipping this data segment because it's spectral flux is too low")
             continue
-        # Extracting Mel spectrogram
-        mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
-            # Extracting BPM (Tempo)
-        tempo, _ = librosa.beat.beat_track(y=segment, sr=sr)
+
+        
+        if AUGMENTED:
+            # select random scaling factor
+            augmented_mel, ground_truth_adjusted, tempo = stretch_and_crop(y, ground_truth, window_size)
+            mel_spectrogram = augmented_mel
+            ground_truth = ground_truth_adjusted
+        else:
+            # Extracting Mel spectrogram
+            mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
+                # Extracting BPM (Tempo)
+            tempo, _ = librosa.beat.beat_track(y=segment, sr=sr)
+            
         
         # # Get the Mel frequency values
-        if True: 
+        if False: 
             mel_freqs = librosa.core.mel_frequencies(n_mels=mel_spectrogram.shape[0], fmin=0, fmax=sr/2)
             
             # Identify indices corresponding to 20Hz and 4kHz
@@ -209,7 +229,7 @@ def preprocess_audio(file_path):
         else:
             mel_spectrogram_normalized = (mel_spectrogram - np.min(mel_spectrogram)) / (np.max(mel_spectrogram) - np.min(mel_spectrogram))
         
-        combined_features = np.vstack(mel_spectrogram_normalized), tempo
+        combined_features = np.vstack(mel_spectrogram_normalized), tempo, ground_truth
         
         segment_features.append(combined_features)
         
@@ -220,10 +240,11 @@ def preprocess_audio(file_path):
 def count_files(directory):
     return sum([len(files) for _, _, files in os.walk(directory)])
 
-def set_files_to_load(files_to_load, sr):
-    global FILES_TO_LOAD, SR
+def set_files_to_load(files_to_load, sr, augmented):
+    global FILES_TO_LOAD, SR, AUGMENTED
     FILES_TO_LOAD = files_to_load
     SR = sr
+    AUGMENTED = augmented
     
 
 
@@ -250,10 +271,10 @@ class CustomAudioDataset(Dataset):
         return sample, groundtruth, bpm_librosa
     
 
-def import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ratio = 0.8, files_to_load = None, sr = 12000):
+def import_audio_get_loader(batch_size = 32, only_dataset = False, train_data_ratio = 0.8, files_to_load = None, sr = 12000, augmented = False):
     
     if files_to_load:
-        set_files_to_load(files_to_load, sr)
+        set_files_to_load(files_to_load, sr, augmented)
     
         # checking shapes
     training_data_path = 'ballroom/BallroomData'

@@ -26,8 +26,7 @@ BPM = 120
 MAX_BPM = 200
 MIN_BPM = 80
 
-CLEAR_INSTRUMENTS = [0]
-
+CLEAR_INSTRUMENTS = [0, 112, 113, 114, 115, 116, 117, 118, 56, 30, 26, 17, 11]
 # New formula to get note duration
 def get_note_duration(bpm, base_note):
     whole_note_duration = 60.0 / bpm * 4  # Duration of a whole note in seconds
@@ -194,4 +193,23 @@ def generate_samples(num_samples=500):
         pool.starmap(generate_samples_for_type, tasks)
         
 # Example
-generate_samples(SAMPLE_CNT)
+#generate_samples(SAMPLE_CNT)
+
+# Anzahl der möglichen Instrumente
+num_instruments = 13
+
+# Summe der Rotationen für alle Taktarten
+time_signatures = [(4, 4), (1, 4), (2, 4), (3, 4), (5, 4), (7, 8)]
+total_rotations = sum([ts[0] for ts in time_signatures])
+
+# Anzahl der BPMs
+num_bpms = 200 - MIN_BPM + 1
+
+# Anzahl der Taktarten
+num_time_signatures = len(time_signatures)
+
+# Gesamtzahl der möglichen Kombinationen
+total_combinations = num_instruments * total_rotations * num_bpms * num_time_signatures
+
+print(total_combinations)
+print(num_instruments)

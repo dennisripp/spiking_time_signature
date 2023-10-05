@@ -160,7 +160,7 @@ def preprocess_audio(file_path):
         tempo, _ = librosa.beat.beat_track(y=segment, sr=sr)
         
         # Get the Mel frequency region of interest
-        if True: 
+        if False: 
             mel_freqs = librosa.core.mel_frequencies(n_mels=mel_spectrogram.shape[0], fmin=0, fmax=sr/2)
             
             # Identify indices corresponding to 20Hz and 4kHz
