@@ -27,6 +27,40 @@ MAX_BPM = 200
 MIN_BPM = 80
 
 CLEAR_INSTRUMENTS = [0, 112, 113, 114, 115, 116, 117, 118, 56, 30, 26, 17, 11]
+
+
+def random_bpm(min_bpm=MIN_BPM, max_bpm=MAX_BPM):
+    if dirty:    
+        return random.randint(min_bpm, max_bpm)
+    return BPM
+
+def bpm_for_fixed_duration(time_signature, fixed_duration=12.0):
+    beats_per_measure, base_note = time_signature
+    new_bpm = random_bpm()
+    
+    # Estimate the number of beats that would fit into the fixed_duration for a standard BPM
+    beats_in_fixed_duration = new_bpm * (fixed_duration / 60.0)
+    
+    # Calculate how many full cycles can fit into the fixed_duration
+    full_cycles_in_duration = beats_in_fixed_duration / beats_per_measure
+    
+    # We want an integer number of full cycles to fit into the fixed_duration
+    # Therefore, we'll round down to the nearest integer for full cycles
+    full_cycles_in_duration = int(full_cycles_in_duration)
+    
+    # Now, we recalculate how many beats this represents
+    total_beats = full_cycles_in_duration * beats_per_measure
+    
+    # Derive the new BPM such that the total_beats fit into the fixed_duration
+    adjusted_bpm = total_beats / (fixed_duration / 60.0)
+    
+    return int(adjusted_bpm)
+
+def random_bpm_based_on_duration(time_signature):
+
+    return bpm_for_fixed_duration(time_signature)
+
+
 # New formula to get note duration
 def get_note_duration(bpm, base_note):
     whole_note_duration = 60.0 / bpm * 4  # Duration of a whole note in seconds
@@ -108,11 +142,6 @@ def add_noise(data, noise_factor=0.05):
         return data + noise_factor * noise
     return data
 
-def random_bpm(min_bpm=MIN_BPM, max_bpm=MAX_BPM):
-    if dirty:    
-        return random.randint(min_bpm, max_bpm)
-    return BPM
-
 # def random_instrument():
 #     return random.randint(0, 127)
 
@@ -153,7 +182,7 @@ def generate_midi_beat(bpm=120, time_signature=(4, 4), instrument=0, duration=10
 
 
 def generate_random_sample(output_folder, time_signature=(4, 4)):
-    bpm, instrument, duration = random_bpm(), random_instrument(), random_duration()
+    bpm, instrument, duration = random_bpm_based_on_duration(time_signature), random_instrument(), DURATION
     
     # Generate a random rotation for the accent profile
     rotation = random.randint(0, time_signature[0] - 1)
@@ -193,23 +222,23 @@ def generate_samples(num_samples=500):
         pool.starmap(generate_samples_for_type, tasks)
         
 # Example
-#generate_samples(SAMPLE_CNT)
+generate_samples(SAMPLE_CNT)
 
-# Anzahl der möglichen Instrumente
-num_instruments = 13
+# # Anzahl der möglichen Instrumente
+# num_instruments = 13
 
-# Summe der Rotationen für alle Taktarten
-time_signatures = [(4, 4), (1, 4), (2, 4), (3, 4), (5, 4), (7, 8)]
-total_rotations = sum([ts[0] for ts in time_signatures])
+# # Summe der Rotationen für alle Taktarten
+# time_signatures = [(4, 4), (1, 4), (2, 4), (3, 4), (5, 4), (7, 8)]
+# total_rotations = sum([ts[0] for ts in time_signatures])
 
-# Anzahl der BPMs
-num_bpms = 200 - MIN_BPM + 1
+# # Anzahl der BPMs
+# num_bpms = 200 - MIN_BPM + 1
 
-# Anzahl der Taktarten
-num_time_signatures = len(time_signatures)
+# # Anzahl der Taktarten
+# num_time_signatures = len(time_signatures)
 
-# Gesamtzahl der möglichen Kombinationen
-total_combinations = num_instruments * total_rotations * num_bpms * num_time_signatures
+# # Gesamtzahl der möglichen Kombinationen
+# total_combinations = num_instruments * total_rotations * num_bpms * num_time_signatures
 
-print(total_combinations)
-print(num_instruments)
+# print(total_combinations)
+# print(num_instruments)

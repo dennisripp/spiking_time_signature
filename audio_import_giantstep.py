@@ -208,7 +208,7 @@ def adjust_fixed_length(features, timesteps, time_axis=-1):
         padding_length = timesteps - features.shape[time_axis]
         pad_widths = [(0, 0) if i != time_axis else (0, padding_length) for i in range(features.ndim)]
         return np.pad(features, pad_widths, mode='constant')
-    
+
 def is_silent(segment, sr, threshold=0.01):
     """Check if the segment is silent based on its RMS energy."""
     rms_value = np.sqrt(np.mean(segment**2))
@@ -220,8 +220,15 @@ def has_low_onset(segment, sr, onset_threshold=0.5):
     mean_onset_strength = np.mean(onset_strengths)
     return mean_onset_strength < onset_threshold
 
+def entropy(mel_spectrogram_normalized):
+    """Calculate the entropy of a normalized mel spectrogram."""
+    p = mel_spectrogram_normalized.flatten() + 1e-6  # Add a small constant to avoid log(0)
+    p /= p.sum()
+    return -np.sum(p * np.log(p))
+
+
 def extract_segments_and_features(y, sr, ground_truth, factor):
-    window_size = 6 * SR
+    window_size = 4 * SR
     step_size = window_size // 2
     segments = sliding_window(y, window_size, step_size)
 
@@ -237,12 +244,24 @@ def extract_segments_and_features(y, sr, ground_truth, factor):
             print("Skipping this data segment because it's spectral flux is too low")
             continue
         # Extracting Mel spectrogram
-        mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
+        
+        if False:
+            mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr)
+        else:
+            n_fft_default = 2048
+            hop_length_default = n_fft_default // 4
+            n_mels_desired = 64  # Adjust as required
+            fmin_desired = 10  # Adjust to your desired minimum frequency (matching your low_pass_cutoff is a good idea)
+            fmax_desired = 7000  # Adjust to your desired maximum frequency (matching your high_pass_cutoff is a good idea)
+            window_default = 'hann'
+            # Extracting Mel spectrogram
+            mel_spectrogram = librosa.feature.melspectrogram(y=segment, sr=sr, n_mels=n_mels_desired, fmin=fmin_desired, fmax=fmax_desired)
+
             # Extracting BPM (Tempo)
         tempo, _ = librosa.beat.beat_track(y=segment, sr=sr)
         
         # # Get the Mel frequency values
-        if True: 
+        if False: 
             mel_freqs = librosa.core.mel_frequencies(n_mels=mel_spectrogram.shape[0], fmin=0, fmax=sr/2)
             
             # Identify indices corresponding to 20Hz and 4kHz
@@ -267,6 +286,9 @@ def extract_segments_and_features(y, sr, ground_truth, factor):
         segment_features.append(combined_features)
     
     return segment_features
+
+def random_value():
+    return random.choice([x * 0.02 + 0.8 for x in range(21)])
         
 def preprocess_audio(file_path, ground_truth):
     y, sr = librosa.load(file_path, sr=SR)
@@ -277,17 +299,25 @@ def preprocess_audio(file_path, ground_truth):
     segments_original = extract_segments_and_features(y, sr, ground_truth, 1.0)
     all_segments += segments_original if segments_original is not None else []# Add original segments
 
+    for i in range(3):
+        random_factor = random_value()
+        if 70 <= ground_truth * random_factor <= 200:
+            y_half_time = librosa.effects.time_stretch(y=y, rate=random_factor)
+            segments_half_time = extract_segments_and_features(y_half_time, sr, ground_truth, random_factor)
+            all_segments += segments_half_time if segments_half_time is not None else []
+        
+        
     # Check the condition for half-time segments and process if it meets
-    if 70 <= ground_truth * 0.5 <= 200:
-        y_half_time = librosa.effects.time_stretch(y=y, rate=0.5)
-        segments_half_time = extract_segments_and_features(y_half_time, sr, ground_truth, 0.5)
-        all_segments += segments_half_time if segments_half_time is not None else []
+    # if 70 <= ground_truth * 0.5 <= 200:
+    #     y_half_time = librosa.effects.time_stretch(y=y, rate=0.5)
+    #     segments_half_time = extract_segments_and_features(y_half_time, sr, ground_truth, 0.5)
+    #     all_segments += segments_half_time if segments_half_time is not None else []
 
-    # Check the condition for double-time segments and process if it meets
-    if 70 <= ground_truth * 2.0 <= 200:
-        y_double_time = librosa.effects.time_stretch(y=y, rate=2.0)
-        segments_double_time = extract_segments_and_features(y_double_time, sr, ground_truth, 2.0)
-        all_segments += segments_double_time if segments_double_time is not None else []
+    # # Check the condition for double-time segments and process if it meets
+    # if 70 <= ground_truth * 2.0 <= 200:
+    #     y_double_time = librosa.effects.time_stretch(y=y, rate=2.0)
+    #     segments_double_time = extract_segments_and_features(y_double_time, sr, ground_truth, 2.0)
+    #     all_segments += segments_double_time if segments_double_time is not None else []
 
     return all_segments
 
